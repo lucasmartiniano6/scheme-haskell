@@ -1,10 +1,12 @@
 module Main where
 import Control.Monad
+import System.IO
 import System.Environment
 import Text.ParserCombinators.Parsec hiding (spaces)
 
 {-
 -- ABSTRACT SYNTAX TREE 
+-- Forest -> [Tree]
 data Tree a = Empty | Node a [Tree a] deriving Show
 
 ast :: Tree LispVal
@@ -17,8 +19,8 @@ makeTree (x:xs) = Node x $
 -- Node + [ Number 1 [Empty] , Number 2 [Empty] ] 
 -}
 
-main :: IO ()
-main = do getArgs >>= print . eval . readExpr . head 
+-- main :: IO ()
+-- main = do getArgs >>= print . eval . readExpr . head 
 
 symbol :: Parser Char
 symbol = oneOf "!$%&|*+-/:<=?>@^_~#"
@@ -204,13 +206,6 @@ strBoolBinop = boolBinop unpackStr
 -- return $ Bool $ (==) 1 2
 -- return  $ Bool False
 
-{-boolBoolBinop :: (a->a->Bool) -> [LispVal] -> LispVal
-boolBoolBinop op params = Bool $ op (params!!0) (params!!1)
-
-strBoolBinop :: (a->a->Bool) -> [LispVal] -> LispVal
-strBoolBinop op params = Bool $ op (params!!0) (params!!1)
--}
-
 unpackNum :: LispVal -> Integer 
 unpackNum (Number n) = n
 unpackNum _ = 0
@@ -246,3 +241,48 @@ eqv[(String a), (String b)] = Bool $ a == b
 eqv[(Atom a), (Atom b)] = Bool $ a == b
 eqv[(List a), (List b)] = Bool $ (length a == length b) && (all eqvPair $ zip a b)
     where eqvPair (x1, x2) = unpackBool $ eqv [x1,x2]
+
+
+flushStr :: String -> IO ()
+flushStr str = putStr str >> hFlush stdout
+
+readPrompt :: String -> IO String
+readPrompt prompt = flushStr prompt >> getLine
+
+-- readExpr :: String -> LispVal
+-- eval :: LispVal -> LispVal
+evalString :: String -> IO String
+evalString expr = do
+    val <- return $ (eval . readExpr) expr
+    return $ show val
+
+
+evalAndPrint :: String -> IO()
+evalAndPrint expr = evalString expr >>= putStrLn
+
+until_ :: Monad m => (a -> Bool) -> m a -> (a -> m ()) -> m()
+until_ pred prompt action = do
+    result <- prompt
+    if pred result
+        then return ()
+        else action result >> until_ pred prompt action 
+
+runRepl :: IO ()
+runRepl = until_ (== "exit") (readPrompt "Lisp >> ") evalAndPrint
+
+main :: IO()
+main = do args <- getArgs
+          case length args of
+            0 -> runRepl
+            1 -> evalAndPrint $ args !! 0
+
+
+
+
+
+
+
+
+
+
+

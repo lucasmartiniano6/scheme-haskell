@@ -122,7 +122,12 @@ eval val@(Number _) = val
 eval val@(Float _) = val
 eval val@(Bool _) = val
 eval (List [Atom "quote", val]) = val
+eval (List [Atom "if", pred, conseq, alt]) = case (eval pred) of
+                                               Bool False -> eval alt
+                                               Number 0 -> eval alt
+                                               otherwise -> eval conseq
 eval (List (Atom func : args) ) = apply func $ map eval args
+
 
 apply :: String -> [LispVal] -> LispVal
 apply func args = maybe (Bool False) ($args) $ lookup func primitives
@@ -149,12 +154,22 @@ primitives = [("+", numericBinop (+)),
               ("<=",numBoolBinop (<=)),
               ("&&", boolBoolBinop (&&)),
               ("||", boolBoolBinop (||)),
+              ("xor", boolBoolBinop (/=)),
+              ("nand", boolBoolBinop nand),
               ("string=?", strBoolBinop (==)),
               ("string<?", strBoolBinop (<)),
               ("string>?", strBoolBinop (>)),
               ("string<=?", strBoolBinop (<=)),
-              ("string>=?", strBoolBinop (>=))]
+              ("string>=?", strBoolBinop (>=)),
+              ("car", car),
+              ("cdr", cdr),
+              ("cons", cons),
+              ("eq?", eqv),
+              ("eqv?", eqv)]
 
+nand :: Bool -> Bool -> Bool
+nand True True = False
+nand _ _ = True
 
 isNumber :: [LispVal] -> LispVal
 isNumber (Number x:xs) = Bool True
@@ -207,3 +222,27 @@ unpackStr (Bool s) = show s
 
 unpackBool :: LispVal -> Bool
 unpackBool (Bool b) = b
+
+car :: [LispVal] -> LispVal
+car [List (x: xs)] = x
+car [DottedList (x : xs) _] = x
+
+cdr :: [LispVal] -> LispVal
+cdr [List (x: xs)] =  List xs
+cdr [DottedList [_] x] = x
+cdr [DottedList (_: xs) x] = DottedList xs x
+
+cons :: [LispVal] -> LispVal
+cons [x1, List[]] = List [x1]
+cons [x, List xs] = List $ x : xs
+cons [x, DottedList xs xlast] = DottedList (x:xs) xlast
+cons [x1, x2] = DottedList [x1] x2
+
+-- weak typing
+eqv :: [LispVal] -> LispVal
+eqv[(Bool a), (Bool b)] = Bool $ a == b
+eqv[(Number a), (Number b)] = Bool $ a == b
+eqv[(String a), (String b)] = Bool $ a == b
+eqv[(Atom a), (Atom b)] = Bool $ a == b
+eqv[(List a), (List b)] = Bool $ (length a == length b) && (all eqvPair $ zip a b)
+    where eqvPair (x1, x2) = unpackBool $ eqv [x1,x2]

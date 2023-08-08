@@ -1,8 +1,10 @@
 module Main where
 import Control.Monad
+import Control.Monad.IO.Class
 import System.IO
 import System.Environment
 import Text.ParserCombinators.Parsec hiding (spaces)
+import Data.IORef
 
 {-
 -- ABSTRACT SYNTAX TREE 
@@ -21,6 +23,59 @@ makeTree (x:xs) = Node x $
 
 -- main :: IO ()
 -- main = do getArgs >>= print . eval . readExpr . head 
+
+type Env = IORef [(String, IORef LispVal)]
+
+nullEnv :: IO Env
+nullEnv = newIORef []
+
+isBound :: Env -> String -> IO Bool
+isBound envRef var = readIORef envRef >>= return . maybe False (const True) . lookup var
+
+getVar :: Env -> String -> IO LispVal
+getVar envRef var = do env <- readIORef envRef
+                       maybe (undefined)
+                             (readIORef)
+                             (lookup var env)
+
+-- readIORef :: IORef a -> IO a
+-- flip writeIORef :: a -> IORef a -> IO ()
+-- lookup :: a -> [(a,b)] -> Maybe b
+
+{-
+setVar :: Env -> String -> LispVal -> IO ()
+setVar envRef var value = do env <- readIORef envRef
+                             maybe (return ())
+                                   (liftIO . (flip writeIORef value))
+                                   (lookup var env)
+-}
+
+setVar :: Env -> String -> LispVal -> IO LispVal
+setVar envRef var value = do env <- readIORef envRef
+                             maybe (return value)
+                                   (const (return value) . (flip writeIORef value))
+                                   (lookup var env)
+                             return value
+
+
+defineVar :: Env -> String -> LispVal -> IO LispVal
+defineVar envRef var value = do
+    alreadyDefined  <- liftIO $ isBound envRef var
+    if alreadyDefined
+        then setVar envRef var value >> return value
+        else liftIO $ do
+            valueRef <- newIORef value
+            env <- readIORef envRef
+            writeIORef envRef ((var, valueRef) : env)
+            return value
+
+bindVars :: Env -> [(String, LispVal)] -> IO Env
+bindVars envRef bindings = readIORef envRef >>= extendEnv bindings >>= newIORef
+    where extendEnv bindings env = liftM (++ env) (mapM addBinding bindings)
+          addBinding (var, value) = do ref <- newIORef value
+                                       return (var, ref)
+
+
 
 symbol :: Parser Char
 symbol = oneOf "!$%&|*+-/:<=?>@^_~#"
@@ -118,21 +173,26 @@ unwordsList = unwords . map showVal
 
 instance Show LispVal where show = showVal
 
-eval :: LispVal -> LispVal
-eval val@(String _) = val
-eval val@(Number _) = val
-eval val@(Float _) = val
-eval val@(Bool _) = val
-eval (List [Atom "quote", val]) = val
-eval (List [Atom "if", pred, conseq, alt]) = case (eval pred) of
-                                               Bool False -> eval alt
-                                               Number 0 -> eval alt
-                                               otherwise -> eval conseq
-eval (List (Atom func : args) ) = apply func $ map eval args
-
+eval :: Env -> LispVal -> IO LispVal
+eval env val@(String _) = return val
+eval env val@(Number _) = return val
+eval env val@(Float _) = return val
+eval env val@(Bool _) = return val
+eval env (Atom id) = getVar env id
+eval env (List [Atom "quote", val]) = return val
+eval env (List [Atom "if", pred, conseq, alt]) =
+    do result <- eval env pred
+       case result of 
+           Bool False -> eval env alt
+           Number 0 -> eval env alt
+           otherwise -> eval env conseq
+eval env (List [Atom "set!", Atom var, form]) = eval env form  >>= setVar env var
+eval env (List [Atom "define", Atom var, form]) = eval env form  >>= defineVar env var
+eval env (List (Atom func : args) ) = mapM (eval env) args >>= return . apply func
+-- mapM :: (LispVal -> IO LispVal) -> [LispVal] -> IO [LispVal]
 
 apply :: String -> [LispVal] -> LispVal
-apply func args = maybe (Bool False) ($args) $ lookup func primitives
+apply func args = maybe (undefined) ($args) $ (lookup func primitives)
 -- apply "+" (map eval (Number 1, Number 2))
 -- apply "+" [Number 1, Number 2]
 -- numericBinop (+) [Number 1, Number 2]
@@ -208,7 +268,7 @@ strBoolBinop = boolBinop unpackStr
 
 unpackNum :: LispVal -> Integer 
 unpackNum (Number n) = n
-unpackNum _ = 0
+-- unpackNum _ = 0
 
 unpackStr :: LispVal -> String
 unpackStr (String s) = s
@@ -250,15 +310,12 @@ readPrompt :: String -> IO String
 readPrompt prompt = flushStr prompt >> getLine
 
 -- readExpr :: String -> LispVal
--- eval :: LispVal -> LispVal
-evalString :: String -> IO String
-evalString expr = do
-    val <- return $ (eval . readExpr) expr
-    return $ show val
+-- eval :: LispVal -> IO LispVal
+evalString :: Env -> String -> IO String
+evalString env expr = liftM show $ (eval env . readExpr) expr
 
-
-evalAndPrint :: String -> IO()
-evalAndPrint expr = evalString expr >>= putStrLn
+evalAndPrint :: Env -> String -> IO()
+evalAndPrint env expr = evalString env expr >>= putStrLn
 
 until_ :: Monad m => (a -> Bool) -> m a -> (a -> m ()) -> m()
 until_ pred prompt action = do
@@ -267,22 +324,16 @@ until_ pred prompt action = do
         then return ()
         else action result >> until_ pred prompt action 
 
+runOne :: String -> IO ()
+runOne expr = nullEnv >>= flip evalAndPrint expr 
+
 runRepl :: IO ()
-runRepl = until_ (== "exit") (readPrompt "Lisp >> ") evalAndPrint
+runRepl = nullEnv >>= until_ (== "exit") (readPrompt "Lisp>> ") . evalAndPrint
 
 main :: IO()
 main = do args <- getArgs
           case length args of
             0 -> runRepl
-            1 -> evalAndPrint $ args !! 0
-
-
-
-
-
-
-
-
-
+            1 -> runOne $ args !! 0
 
 

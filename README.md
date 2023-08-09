@@ -1,12 +1,12 @@
 # Scheme-Haskell
-Writing an interpreter for a custom programming language (~Scheme) written in Haskell. Why? Scheme is a dialect of Lisp and Haskell is cool.
+Writing an interpreter for a custom programming language (~Scheme) using Haskell. Why? Scheme is a dialect of Lisp and Haskell is cool. Check refs for more.
 
 ![scheme](https://upload.wikimedia.org/wikipedia/commons/thumb/3/39/Lambda_lc.svg/121px-Lambda_lc.svg.png)
 
 Nice TODO
 -----
 * Increment Standard Library
-* Implement Hygienic macros
+* Hygienic macros
 * Add exception handling
 
 Usage
@@ -36,4 +36,5 @@ Implementation
 -----
 Based on:
   * https://upload.wikimedia.org/wikipedia/commons/a/aa/Write_Yourself_a_Scheme_in_48_Hours.pdf
+  * https://conservatory.scheme.org/schemers/Documents/Standards/R5RS/HTML/r5rs.html
   * https://hoogle.haskell.org/ 

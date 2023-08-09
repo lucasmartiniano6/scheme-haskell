@@ -75,8 +75,6 @@ bindVars envRef bindings = readIORef envRef >>= extendEnv bindings >>= newIORef
           addBinding (var, value) = do ref <- newIORef value
                                        return (var, ref)
 
-
-
 symbol :: Parser Char
 symbol = oneOf "!$%&|*+-/:<=?>@^_~#"
 
@@ -95,6 +93,9 @@ data LispVal = Atom String
              | String String
              | Float Float
              | Bool Bool
+             | PrimitiveFunc ([LispVal] -> LispVal)
+             | Func { params :: [String], vararg :: (Maybe String),
+                      body :: [LispVal], closure :: Env }
 
 parseString :: Parser LispVal
 parseString = do 
@@ -165,6 +166,11 @@ showVal (Bool True) = "#t"
 showVal (Bool False) = "#f"
 showVal (List x) = "(" ++ unwordsList x ++ ")"
 showVal (DottedList head tail) = "(" ++ unwordsList head ++ "." ++ showVal tail ++ ")"
+showVal (PrimitiveFunc _) = "<primitive>"
+showVal (Func {params = args, vararg = varargs, body = body, closure = env}) = 
+    "(lambda (" ++ unwords (map show args) ++ (case varargs of
+                                                Nothing -> ""
+                                                Just arg -> " . " ++ arg) ++ ") ...)"
 
 unwordsList :: [LispVal] -> String
 -- unwordsList [] = ""
@@ -172,6 +178,11 @@ unwordsList :: [LispVal] -> String
 unwordsList = unwords . map showVal
 
 instance Show LispVal where show = showVal
+
+makeFunc varargs env params body = return $ Func (map showVal params) varargs body env
+makeNormalFunc :: Env -> [LispVal] -> [LispVal] -> IO LispVal
+makeNormalFunc = makeFunc Nothing
+makeVarArgs = makeFunc . Just . showVal
 
 eval :: Env -> LispVal -> IO LispVal
 eval env val@(String _) = return val
@@ -188,14 +199,41 @@ eval env (List [Atom "if", pred, conseq, alt]) =
            otherwise -> eval env conseq
 eval env (List [Atom "set!", Atom var, form]) = eval env form  >>= setVar env var
 eval env (List [Atom "define", Atom var, form]) = eval env form  >>= defineVar env var
-eval env (List (Atom func : args) ) = mapM (eval env) args >>= return . apply func
+eval env (List (Atom "define" : List (Atom var : params) : body)) =
+     makeNormalFunc env params body >>= defineVar env var
+eval env (List (Atom "define" : DottedList (Atom var : params) varargs : body)) =
+    makeVarArgs varargs env params body >>= defineVar env var
+eval env (List (Atom "lambda" : List params : body)) =
+    makeNormalFunc env params body
+eval env (List (Atom "lambda" : DottedList params varargs : body)) =
+    makeVarArgs varargs env params body
+eval env (List (Atom "lambda" : varargs@(Atom _) : body)) =
+    makeVarArgs varargs env [] body
+
+eval env (List (function : args) ) = do
+    func <- eval env function
+    argVals <- mapM (eval env) args
+    apply func argVals
 -- mapM :: (LispVal -> IO LispVal) -> [LispVal] -> IO [LispVal]
 
-apply :: String -> [LispVal] -> LispVal
-apply func args = maybe (undefined) ($args) $ (lookup func primitives)
+apply :: LispVal -> [LispVal] -> IO LispVal
+-- apply func args = maybe (undefined) ($args) $ (lookup func primitives)
+apply (PrimitiveFunc func) args = return $ func args
+apply (Func params varargs body closure) args =
+      (liftIO $ bindVars closure $ zip params args) >>= bindVarArgs varargs >>= evalBody
+      where remainingArgs = drop (length params) args
+            evalBody env = liftM last $ mapM (eval env) body
+            bindVarArgs arg env = case arg of
+                Just argName -> liftIO $ bindVars env [(argName, List $ remainingArgs)]
+                Nothing -> return env
 -- apply "+" (map eval (Number 1, Number 2))
 -- apply "+" [Number 1, Number 2]
 -- numericBinop (+) [Number 1, Number 2]
+
+primitiveBindings :: IO Env
+primitiveBindings = nullEnv >>= (flip bindVars $ map makePrimitiveFunc primitives)
+    where makePrimitiveFunc (var, func) = (var, PrimitiveFunc func)
+
 
 primitives :: [(String, [LispVal] -> LispVal)]
 primitives = [("+", numericBinop (+)),
@@ -278,6 +316,9 @@ unpackStr (Bool s) = show s
 unpackBool :: LispVal -> Bool
 unpackBool (Bool b) = b
 
+unpackAtom :: LispVal -> String
+unpackAtom (Atom s) = s
+
 car :: [LispVal] -> LispVal
 car [List (x: xs)] = x
 car [DottedList (x : xs) _] = x
@@ -325,10 +366,10 @@ until_ pred prompt action = do
         else action result >> until_ pred prompt action 
 
 runOne :: String -> IO ()
-runOne expr = nullEnv >>= flip evalAndPrint expr 
+runOne expr = primitiveBindings >>= flip evalAndPrint expr 
 
 runRepl :: IO ()
-runRepl = nullEnv >>= until_ (== "exit") (readPrompt "Lisp>> ") . evalAndPrint
+runRepl = primitiveBindings >>= until_ (== "exit") (readPrompt "Lisp>> ") . evalAndPrint
 
 main :: IO()
 main = do args <- getArgs

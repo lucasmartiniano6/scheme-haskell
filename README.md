@@ -1,5 +1,5 @@
 # Scheme-Haskell
-Writing an interpreter for a custom programming language (~Scheme) using Haskell. Why? Scheme is a dialect of Lisp and Haskell is cool. Check refs for more.
+Writing an interpreter for ~Scheme using Haskell. Why? Scheme is a dialect of Lisp and Haskell is cool. Check refs for more.
 
 ![scheme](https://upload.wikimedia.org/wikipedia/commons/thumb/3/39/Lambda_lc.svg/121px-Lambda_lc.svg.png)
 
